@@ -2,12 +2,21 @@ name: Eternal Browser - Build APK
 
 on:
   workflow_dispatch:
+
   push:
     branches:
+      - main
       - eternal
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+      - 'args.gn'
+      - 'patches/**'
+      - '**'
 
 permissions:
   contents: write
+  actions: read
 
 env:
   DEPOT_TOOLS_UPDATE: "0"
@@ -15,14 +24,13 @@ env:
 
 jobs:
   setup:
-    name: Setup
+    name: Setup Dependencies
     runs-on: ubuntu-latest
-
     steps:
-      - name: Baixar repositório
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Instalar dependências
+      - name: Install dependencies
         run: |
           chmod +x .github/scripts/setup-deps.sh
           .github/scripts/setup-deps.sh
@@ -34,13 +42,13 @@ jobs:
           key: depot-tools-${{ runner.os }}-v1
 
   build:
-    name: Build Eternal Browser APK
+    name: Build Android APK
     needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Baixar repositório
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Cache depot_tools
@@ -57,24 +65,38 @@ jobs:
           restore-keys: |
             eternal-ccache-${{ runner.os }}-
 
-      - name: Cache compilação
+      - name: Cache Chromium output
         uses: actions/cache@v4
         with:
           path: out/android_arm
           key: eternal-out-${{ runner.os }}-${{ hashFiles('args.gn') }}-${{ github.sha }}
           restore-keys: |
             eternal-out-${{ runner.os }}-${{ hashFiles('args.gn') }}-
-            eternal-out-${{ runner.os }}-
 
-      - name: Mostrar espaço disponível
-        run: df -h
+      - name: Check disk space
+        run: |
+          df -h
+          free -h
 
-      - name: Compilar APK
+      - name: Validate build files
+        run: |
+          test -f args.gn || {
+            echo "::error::args.gn não encontrado."
+            exit 1
+          }
+
+          test -f .github/scripts/build-apk.sh || {
+            echo "::error::build-apk.sh não encontrado."
+            exit 1
+          }
+
+      - name: Build APK
         run: |
           chmod +x .github/scripts/build-apk.sh
           .github/scripts/build-apk.sh
 
-      - name: Enviar APK
+      - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Eternal-Browser-APK
@@ -86,19 +108,19 @@ jobs:
           retention-days: 14
 
   release:
-    name: Draft Release
+    name: Create Draft Release
     needs: build
-    if: github.event_name == 'push'
+    if: success() && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Baixar APK
+      - name: Download APK
         uses: actions/download-artifact@v4
         with:
           name: Eternal-Browser-APK
           path: release-assets
 
-      - name: Criar release de rascunho
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: eternal-build-${{ github.run_number }}
@@ -107,7 +129,7 @@ jobs:
           prerelease: true
           files: release-assets/**/*.apk
           body: |
-            Build experimental do Eternal Browser.
-            Teste a instalação e as extensões antes de distribuir.
+            Eternal Browser - Android build experimental.
+            Teste instalação, estabilidade e extensões antes de distribuir.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
