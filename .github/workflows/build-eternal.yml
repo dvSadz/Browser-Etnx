@@ -1,0 +1,113 @@
+name: Eternal Browser - Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - eternal
+
+permissions:
+  contents: write
+
+env:
+  DEPOT_TOOLS_UPDATE: "0"
+  GYP_CHROMIUM_NO_ACTION: "1"
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Instalar dependências
+        run: |
+          chmod +x .github/scripts/setup-deps.sh
+          .github/scripts/setup-deps.sh
+
+      - name: Cache depot_tools
+        uses: actions/cache@v4
+        with:
+          path: ~/depot_tools
+          key: depot-tools-${{ runner.os }}-v1
+
+  build:
+    name: Build Eternal Browser APK
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Cache depot_tools
+        uses: actions/cache@v4
+        with:
+          path: ~/depot_tools
+          key: depot-tools-${{ runner.os }}-v1
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: eternal-ccache-${{ runner.os }}-${{ hashFiles('args.gn') }}
+          restore-keys: |
+            eternal-ccache-${{ runner.os }}-
+
+      - name: Cache compilação
+        uses: actions/cache@v4
+        with:
+          path: out/android_arm
+          key: eternal-out-${{ runner.os }}-${{ hashFiles('args.gn') }}-${{ github.sha }}
+          restore-keys: |
+            eternal-out-${{ runner.os }}-${{ hashFiles('args.gn') }}-
+            eternal-out-${{ runner.os }}-
+
+      - name: Mostrar espaço disponível
+        run: df -h
+
+      - name: Compilar APK
+        run: |
+          chmod +x .github/scripts/build-apk.sh
+          .github/scripts/build-apk.sh
+
+      - name: Enviar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eternal-Browser-APK
+          path: |
+            out/android_arm/apks/*.apk
+            out/android_arm/apks/**/*.apk
+            out/android_arm/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Draft Release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar APK
+        uses: actions/download-artifact@v4
+        with:
+          name: Eternal-Browser-APK
+          path: release-assets
+
+      - name: Criar release de rascunho
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: eternal-build-${{ github.run_number }}
+          name: Eternal Browser Build ${{ github.run_number }}
+          draft: true
+          prerelease: true
+          files: release-assets/**/*.apk
+          body: |
+            Build experimental do Eternal Browser.
+            Teste a instalação e as extensões antes de distribuir.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
